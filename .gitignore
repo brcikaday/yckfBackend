@@ -1,0 +1,19 @@
+# Environment files
+.env
+*.env
+
+# Python
+__pycache__/
+*.pyc
+
+# VSCode
+.vscode/
+
+# SQLite (only if you don't want to track local DB)
+app.db
+
+# Uploads
+uploads/
+
+# Virtual env
+venv/
