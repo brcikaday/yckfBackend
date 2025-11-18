@@ -21,7 +21,7 @@ migrate = Migrate(app, db)
 jwt = flask_jwt_extended.JWTManager(app)
 mail = Mail(app)
 # CORS(app)
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}}, supports_credentials=True)
 
 
 
