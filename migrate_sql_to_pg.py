@@ -9,7 +9,7 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 sqlite_engine = create_engine(f"sqlite:///{os.path.join(basedir, 'app.db')}")
 
 # Connect to the PostgreSQL database
-pg_engine = create_engine('postgresql://yckf_data_user:l0qC1Bwta69cP1PIMtoKoQoGXvOl1Vxw@dpg-d4e2166r433s738dmugg-a.oregon-postgres.render.com/yckf_data')
+pg_engine = create_engine(os.environ.get('DATABASE_URL'))
 
 # Read data from SQLite
 inspector = inspect(sqlite_engine)

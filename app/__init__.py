@@ -24,6 +24,7 @@ mail = Mail(app)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 
+
 @jwt.unauthorized_loader
 def unauthorized_response(callback):
     return jsonify({"error": "Missing or invalid authorization header"}), 401
@@ -36,4 +37,10 @@ def invalid_token_response(reason):
 def expired_token_response(jwt_header, jwt_payload):
     return jsonify({"error": "Token has expired"}), 401
 
-from app import routes, models
+from app import models
+
+with app.app_context():
+    db.create_all()
+
+
+from app import routes
