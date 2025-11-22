@@ -23,7 +23,7 @@ class User(db.Model):
     donations: so.Mapped[list["Donation"]] = so.relationship("Donation", back_populates="user", cascade="all, delete")
 
     def __repr__(self):
-        return '<User {}>'.format({self.id,self.fullname, self.roles})
+        return '<User {}>'.format({self.id,self.fullname, self.roles,self.password_hash})
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -110,7 +110,7 @@ class Lesson(db.Model):
 
     id: so.Mapped[int] = so.mapped_column(primary_key=True)
     title: so.Mapped[str] = so.mapped_column(sa.String(255), nullable=False)
-    content: so.Mapped[str] = so.mapped_column(sa.Text, nullable=False)
+    # content: so.Mapped[str] = so.mapped_column(sa.Text, nullable=False)
     video_url: so.Mapped[str] = so.mapped_column(sa.String(255), nullable=True)
     pdf_url: so.Mapped[str] = so.mapped_column(sa.String(255), nullable=True)
     order: so.Mapped[int] = so.mapped_column(sa.Integer, nullable=True)  # For ordering lessons
@@ -124,6 +124,18 @@ class Lesson(db.Model):
     )
 
     course: so.Mapped["Course"] = so.relationship("Course", back_populates="lessons")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "title": self.title,
+            # "content": self.content,
+            "video_url": self.video_url,
+            "pdf_url": self.pdf_url,
+            "order": self.order,
+            "course_id": self.course_id,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        }
 
 
 class Enrollment(db.Model):

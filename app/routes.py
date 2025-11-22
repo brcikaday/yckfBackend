@@ -155,6 +155,11 @@ def update_course(id):
     course.title = data['title']
     course.description = data['description']
     course.video_url = data['video_url']
+    course.time = data['time']
+    course.level = data['level']
+    course.tags = data['tags']
+    course.is_multipart = data['is_multipart']
+    course.pdf_url = data['pdf_url'] 
     course.is_premium = data['is_premium']
     course.category_id = data['category_id']
 
@@ -188,9 +193,9 @@ def add_lesson(id):
     data = request.get_json()
     new_lesson = Lesson(
         title=data['title'],
-        content=data['content'],
+        # content=data['content'],
         video_url=data['video_url'],
-        pdf_url=data['pdf_url'],
+        pdf_url=data['content_url'],
         order=data['order'],
         course=course
     )
