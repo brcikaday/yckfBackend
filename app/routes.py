@@ -95,6 +95,14 @@ def get_courses():
     return jsonify([course.to_dict() for course in courses]), 200
 
 
+@app.route('/courses/<int:id>', methods=['GET'])
+def get_course(id):
+    course = db.session.get(Course, id)
+    if not course:
+        return jsonify({'error': 'Course not found'}), 404
+    return jsonify(course.to_dict()), 200
+
+
 
 @app.route('/create_course', methods=['POST'])
 def create_course():
@@ -151,17 +159,16 @@ def update_course(id):
     if not course:
         return jsonify({'error': 'Course not found'}), 404
 
-    data = request.get_json()
-    course.title = data['title']
-    course.description = data['description']
-    course.video_url = data['video_url']
-    course.time = data['time']
-    course.level = data['level']
-    course.tags = data['tags']
-    course.is_multipart = data['is_multipart']
-    course.pdf_url = data['pdf_url'] 
-    course.is_premium = data['is_premium']
-    course.category_id = data['category_id']
+    course.title =request.form.get('title')
+    course.description = request.form.get('description')
+    course.video_url = request.form.get('video_url')
+    course.time = request.form.get('time')
+    course.level = request.form.get('level')
+    course.tags = request.form.get('tags')
+    course.is_multipart = request.form.get('is_multipart') == 'true'
+    course.pdf_url = request.form.get('pdf_url') 
+    course.is_premium = request.form.get('is_premium') == 'true'
+    course.category_id = request.form.get('category_id')
 
     db.session.commit()
     ActivityLog.log_activity("course", f"Updated course: {course.title}")
@@ -232,6 +239,16 @@ def update_lesson(course_id, lesson_id):
     return jsonify({'message': 'Lesson updated successfully'}), 200
 
 
+@app.route('/courses/<int:course_id>/lessons', methods=['GET'])
+def get_lessons(course_id):
+    course = db.session.get(Course, course_id)
+    if not course:
+        return jsonify({'error': 'Course not found'}), 404
+
+    lessons = db.session.scalars(sa.select(Lesson).where(Lesson.course_id == course_id)).all()
+    return jsonify([lesson.to_dict() for lesson in lessons]), 200
+
+
 @app.route('/courses/<int:course_id>/lessons/<int:lesson_id>', methods=['DELETE'])
 def delete_lesson(course_id, lesson_id):
     course = db.session.get(Course, course_id)
@@ -247,6 +264,71 @@ def delete_lesson(course_id, lesson_id):
     ActivityLog.log_activity("lesson", f"Deleted lesson: {lesson.title} for course: {course.title}")
 
     return jsonify({'message': 'Lesson deleted successfully'}), 200
+
+
+@app.route('/courses/<int:course_id>/enrollment_status', methods=['GET'])
+@jwt_required()
+def get_enrollment_status(course_id):
+    user_id = get_jwt_identity()
+    if not user_id:
+        return jsonify({'error': 'User not authenticated'}), 401
+
+    enrollment = db.session.scalar(sa.select(Enrollment).where(
+        Enrollment.user_id == user_id,
+        Enrollment.course_id == course_id
+    ))
+
+    donations = db.session.scalars(sa.select(Donation).where(Donation.user_id == user_id))
+
+    if enrollment and donations:
+        return jsonify({'enrolled': True, 'donated': True, 'progress': enrollment.progress}), 200
+    else:
+        return jsonify({'enrolled': False, 'donated': False}), 200
+    
+
+
+@app.route('/courses/<int:course_id>/enroll', methods=['POST'])
+@jwt_required()
+def enroll_course(course_id):
+    user_id = get_jwt_identity()
+    if not user_id:
+        return jsonify({'error': 'User not authenticated'}), 401
+    
+    course = db.session.get(Course, course_id)
+    user = db.session.get(User, user_id)
+    if not course:
+        return jsonify({'error': 'Course not found'}), 404
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    existing_enrollment = db.session.scalar(sa.select(Enrollment).where(
+        Enrollment.user_id == user_id,
+        Enrollment.course_id == course_id
+    ))
+    if existing_enrollment:
+        return jsonify({'error': 'User already enrolled in this course'}), 400
+    
+    new_enrollment = Enrollment(
+        user_id=user_id,
+        course_id=course_id
+    )
+
+    db.session.add(new_enrollment)
+    db.session.commit()
+    ActivityLog.log_activity("enrollment", f" user: {user.fullname} enrolled in course: {course.title}")
+
+    return jsonify({'message': 'Enrollment successful'}), 201
+
+
+@app.route('/enrolled', methods=['GET'])
+@jwt_required()
+def get_user_enrollments():
+    user_id = get_jwt_identity()
+    if not user_id:
+        return jsonify({'error': 'User not authenticated'}), 401
+    
+    enrollments = db.session.scalars(sa.select(Enrollment).where(Enrollment.user_id == user_id)).all()
+    return jsonify([enrollment.to_dict() for enrollment in enrollments]), 200
 
 
 
@@ -324,6 +406,8 @@ def delete_category(id):
     ActivityLog.log_activity("category", f"Deleted category: {category.name}")
 
     return jsonify({'message': 'Category deleted successfully'}), 200
+
+
 
 @app.route('/categories/edit/<int:id>', methods=['PUT'])
 def edit_category(id):
@@ -572,3 +656,63 @@ def paystack_webhook():
             mail.send(msg)
 
     return jsonify({"message": "Webhook received successfully"}), 200
+
+
+@app.route('/verify-payment/<reference>', methods=['GET'])
+@jwt_required()
+def verify_payment(reference):
+    user_id = get_jwt_identity()
+    donation = db.session.scalar(sa.select(Donation).where(
+        Donation.transaction_ref == reference,
+        Donation.user_id == user_id
+    ))
+
+    if not donation:
+        return jsonify({"error": "Donation not found"}), 404
+
+    if donation.status == 'success':
+        return jsonify({"message": "Payment already verified", "status": donation.status}), 200
+
+    headers = {
+        "Authorization": f"Bearer {Config.PAYSTACK_SECRET_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        response = requests.get(f"https://api.paystack.co/transaction/verify/{reference}", headers=headers)
+        res_data = response.json()
+    except Exception as e:
+        return jsonify({"error": f"Payment verification failed: {str(e)}"}), 500
+
+    if not res_data.get("status"):
+        return jsonify({"error": "Failed to verify payment"}), 400
+
+    payment_status = res_data["data"]["status"]
+    if payment_status == "success":
+        donation.status = 'success'
+        donation.webhook_confirmed = True
+        db.session.commit()
+        ActivityLog.log_activity("donation", f"Verified donation payment for user ID: {user_id} with reference: {reference}")
+        return jsonify({"message": "Payment verified successfully", "status": donation.status}), 200
+    else:
+        donation.status = payment_status
+        db.session.commit()
+        return jsonify({"message": "Payment not successful", "status": donation.status}), 400
+
+
+@app.route('/api/exchange-rates', methods=['GET'])
+def get_exchange_rates():
+    try:
+        response = requests.get('https://api.exchangerate-api.com/v4/latest/USD')
+        data = response.json()
+        
+        # Extract GHS rate
+        ghs_rate = data['rates']['GHS']
+        
+        return jsonify({
+            "GHS": ghs_rate,
+            "USD": 1.0
+        }), 200
+    except Exception as e:
+        # Fallback to static rate if API fails
+        return jsonify({"GHS": 15.5, "USD": 1.0}), 200

@@ -155,6 +155,19 @@ class Enrollment(db.Model):
 
     course: so.Mapped["Course"] = so.relationship("Course", back_populates="enrollments")
 
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "course_id": self.course_id,
+            "course": {
+            "id": self.course.id,
+            "title": self.course.title,
+            },
+            "progress": self.progress,
+            "enrolled_at": self.enrolled_at.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
 
 
 class Category(db.Model):
@@ -189,6 +202,7 @@ class Donation(db.Model):
 
     user: so.Mapped["User"] = so.relationship("User", back_populates="donations")
     course: so.Mapped["Course"] = so.relationship("Course", back_populates="donations")
+    
 
 class ActivityLog(db.Model):
     __tablename__ = "activity_logs"
