@@ -679,7 +679,7 @@ def verify_payment(reference):
     }
 
     try:
-        response = requests.get(f"https://api.paystack.co/transaction/verify/{reference}", headers=headers)
+        response = requests.get(f"https://api.paystack.co/transaction/verify/{reference}", headers=headers,timeout=15)
         res_data = response.json()
     except Exception as e:
         return jsonify({"error": f"Payment verification failed: {str(e)}"}), 500
