@@ -192,7 +192,7 @@ class Donation(db.Model):
     id: so.Mapped[int] = so.mapped_column(primary_key=True)
     user_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("users.id"), nullable=False)
     amount: so.Mapped[float] = so.mapped_column(sa.Float, nullable=False)
-    course_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("courses.id"), nullable=False)
+    course_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("courses.id"), nullable=True)
     currency: so.Mapped[str] = so.mapped_column(sa.String(10), default="GHS")
     payment_method: so.Mapped[str] = so.mapped_column(sa.String(50), nullable=True)
     status: so.Mapped[str] = so.mapped_column(sa.String(20), default="pending")
