@@ -26,6 +26,11 @@ CORS(app)
 @app.route('/signup', methods=['POST'])
 def signup():
     data = request.get_json()
+
+    existing_user = db.session.scalar(sa.select(User).where(User.email == data['email']))
+    if existing_user:
+        return jsonify({'message': 'Email already registered'}), 400
+    
     new_user = User(
         email=data['email'],
         fullname=data['full_name']
@@ -266,6 +271,7 @@ def delete_lesson(course_id, lesson_id):
     return jsonify({'message': 'Lesson deleted successfully'}), 200
 
 
+
 @app.route('/courses/<int:course_id>/enrollment_status', methods=['GET'])
 @jwt_required()
 def get_enrollment_status(course_id):
@@ -278,12 +284,16 @@ def get_enrollment_status(course_id):
         Enrollment.course_id == course_id
     ))
 
-    donations = db.session.scalars(sa.select(Donation).where(Donation.user_id == user_id))
+    # Check if user has made ANY donation (any donation unlocks all premium content)
+    has_donation = db.session.scalar(
+        sa.select(sa.func.count(Donation.id)).where(Donation.user_id == user_id)
+    ) > 0
 
-    if enrollment and donations:
-        return jsonify({'enrolled': True, 'donated': True, 'progress': enrollment.progress}), 200
-    else:
-        return jsonify({'enrolled': False, 'donated': False}), 200
+    return jsonify({
+        'is_enrolled': enrollment is not None,
+        'has_donated': has_donation,
+        'progress': enrollment.progress if enrollment else 0
+    }), 200
     
 
 
@@ -514,8 +524,52 @@ def change_admin_password():
 
 
 
+@app.route('/student/profile', methods=['GET'])
+@jwt_required()
+def student_profile():
+    user_id = get_jwt_identity()
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    return jsonify(user.to_dict()), 200
 
 
+
+@app.route('/student/change-profile', methods=['PUT'])
+@jwt_required()
+def change_student_profile():
+    user_id = get_jwt_identity()
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    
+    data = request.get_json()
+    user.fullname = data['name']
+    email = data['email']
+
+    if db.session.scalar(sa.select(User).where(User.email == email)):
+        return jsonify({'error': 'Email already in use'}), 400
+    user.email = email
+    db.session.commit()
+    ActivityLog.log_activity("user", f"Updated student profile: {user.fullname}")
+    return jsonify(user.to_dict()), 200
+
+@app.route('/student/change-password', methods=['PUT'])
+@jwt_required()
+def change_student_password():
+    user_id = get_jwt_identity()
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    data = request.get_json()
+    password = data['password']
+    user.set_password(password)
+
+    db.session.commit()
+    ActivityLog.log_activity("user", f"Changed student password: {user.fullname}")
+
+    return jsonify({'message': 'Student password changed successfully'}), 200
 
 
 
@@ -639,7 +693,7 @@ def paystack_webhook():
             # Send confirmation email
             msg = Message(
                 subject="Donation Successful",
-                sender="noreply@yourdomain.com",
+                sender= Config.MAIL_DEFAULT_SENDER,
                 recipients=[user.email]
             )
             msg.body = f"""
@@ -653,7 +707,10 @@ def paystack_webhook():
             Best regards,
             The Team
             """
-            mail.send(msg)
+            try:
+                mail.send(msg)
+            except Exception as e:
+                print(f"Failed to send email: {e}")
 
     return jsonify({"message": "Webhook received successfully"}), 200
 
@@ -716,3 +773,7 @@ def get_exchange_rates():
     except Exception as e:
         # Fallback to static rate if API fails
         return jsonify({"GHS": 15.5, "USD": 1.0}), 200
+
+
+
+
