@@ -264,7 +264,7 @@ class AuditLog(db.Model):
     error_message: so.Mapped[str] = so.mapped_column(sa.String(500), nullable=True)
     
     # Additional metadata (JSON for flexibility)
-    metadata: so.Mapped[dict] = so.mapped_column(sa.JSON, nullable=True)
+    meta_data: so.Mapped[dict] = so.mapped_column(sa.JSON, nullable=True)
     
     # Relationship
     admin = db.relationship("User", foreign_keys=[id], backref="audit_logs")
@@ -285,13 +285,13 @@ class AuditLog(db.Model):
             "user_agent": self.user_agent,
             "status": self.status,
             "error_message": self.error_message,
-            "metadata": self.metadata
+            "meta_data": self.meta_data
         }
 
     @staticmethod
     def log_audit(id, name, role, action, action_type, description, 
                   target_type=None, target_id=None, ip_address=None, user_agent=None, 
-                  status='success', error_message=None, metadata=None):
+                  status='success', error_message=None, meta_data=None):
         """
         Log an audit entry
         
@@ -308,7 +308,7 @@ class AuditLog(db.Model):
             ip_address=request.remote_addr,
             user_agent=request.headers.get('User-Agent'),
             status='success',
-            metadata={"provider": "Flutterwave"}
+            meta_data={"provider": "Flutterwave"}
         )
         """
         audit = AuditLog(
@@ -324,7 +324,7 @@ class AuditLog(db.Model):
             user_agent=user_agent,
             status=status,
             error_message=error_message,
-            metadata=metadata
+            meta_data=meta_data
         )
         db.session.add(audit)
         db.session.commit()
