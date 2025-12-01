@@ -4,14 +4,14 @@ certifi==2025.10.5
 charset-normalizer==3.4.4
 click==8.3.0
 colorama==0.4.6
-Flask==2.3.3
+Flask
 flask-cors==6.0.1
 Flask-JWT-Extended==4.7.1
 Flask-Mail==0.10.0
 Flask-Migrate==4.1.0
 Flask-SQLAlchemy==3.1.1
 greenlet==3.2.4
-gunicorn==20.1.0
+gunicorn
 idna==3.11
 itsdangerous==2.2.0
 Jinja2==3.1.6
@@ -25,6 +25,7 @@ SQLAlchemy==2.0.44
 typing_extensions==4.15.0
 urllib3==2.5.0
 Werkzeug==2.3.8
-reportlab==4.0.9
-qrcode==7.4.2
-Pillow==10.1.0
+reportlab==3.6.0
+qrcode[pil]==7.4.2
+Pillow==9.5.0
+
