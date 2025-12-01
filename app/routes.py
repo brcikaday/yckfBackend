@@ -3,7 +3,7 @@ import sqlalchemy as sa
 from flask import jsonify, request
 import requests
 from app.config import Config
-from app.models import User, Course,Category, Enrollment, ActivityLog,Donation,Lesson
+from app.models import User, Course,Category, Enrollment, ActivityLog,Donation,Lesson, AuditLog, Certificate
 from app import db
 from app import jwt
 from flask_cors import CORS
@@ -13,12 +13,22 @@ import hashlib
 from flask_mail import Message
 from app import mail
 from flask_jwt_extended import get_jwt_identity, jwt_required
-from app.emails import send_password_reset_email
+from app.emails import send_password_reset_email, send_donation_email
 import os
 from werkzeug.utils import secure_filename
 from app.helpers.allowedfiles import allowed_file
 import time
 import uuid
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
+import qrcode
+from PIL import Image
+import io
+from flask import send_file, current_app
+from datetime import datetime
+
 
 
 CORS(app)
@@ -51,7 +61,10 @@ def signin():
     if user and user.check_password(data['password']):
         access_token = flask_jwt_extended.create_access_token(identity=str(user.id), additional_claims={"role": role})
         return jsonify({'message': 'Login successful', 'access_token': access_token, 'role': role}), 200
+    
+
     return jsonify({'message': 'Invalid email or password'}), 401
+
 
 
 
@@ -330,6 +343,29 @@ def enroll_course(course_id):
     return jsonify({'message': 'Enrollment successful'}), 201
 
 
+
+@app.route('/courses/<int:course_id>/progress', methods=['PUT'])
+@jwt_required()
+def update_progress(course_id):
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    progress = min(100, max(0, data.get('progress', 0)))  # Clamp 0-100
+    
+    enrollment = db.session.scalar(sa.select(Enrollment).where(
+        Enrollment.user_id == user_id,
+        Enrollment.course_id == course_id
+    ))
+    
+    if enrollment:
+        enrollment.progress = progress
+        db.session.commit()
+        return jsonify({'progress': progress}), 200
+    
+    return jsonify({'error': 'Not enrolled'}), 404
+
+
+
+
 @app.route('/enrolled', methods=['GET'])
 @jwt_required()
 def get_user_enrollments():
@@ -348,6 +384,33 @@ def get_user_enrollments():
 def get_users():
     users = db.session.scalars(sa.select(User)).all()
     return jsonify([user.to_dict() for user in users]), 200
+
+
+@app.route('/users/<int:id>/role', methods=['PUT'])
+def update_user_role(id):
+    user = db.session.get(User, id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    data = request.get_json()
+    user.roles = data['roles']
+    db.session.commit()
+    ActivityLog.log_activity("user", f"Updated user role: {user.fullname}")
+
+    return jsonify({'message': 'User role updated successfully'}), 200
+
+
+@app.route('/users/<int:id>', methods=['DELETE'])
+def delete_user(id):
+    user = db.session.get(User, id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    db.session.delete(user)
+    db.session.commit()
+    ActivityLog.log_activity("user", f"Deleted user: {user.fullname}")
+
+    return jsonify({'message': 'User deleted successfully'}), 200
 
 
 
@@ -554,6 +617,8 @@ def change_student_profile():
     ActivityLog.log_activity("user", f"Updated student profile: {user.fullname}")
     return jsonify(user.to_dict()), 200
 
+
+
 @app.route('/student/change-password', methods=['PUT'])
 @jwt_required()
 def change_student_password():
@@ -579,7 +644,10 @@ def generate_reference(prefix="donate"):
 
 
 
-
+@app.route('/donations', methods=['GET'])
+def get_donations():
+    donations = db.session.scalars(sa.select(Donation)).all()
+    return jsonify([donation.to_dict() for donation in donations]), 200
 
 
 
@@ -594,6 +662,7 @@ def create_donation_payment_session():
 
     if not amount or amount < 50 or amount > 100 or not user_id:
         return jsonify({"error": "Invalid amount"}), 400
+        
 
     # Generate a unique reference for the transaction
     user = db.session.get(User, user_id)
@@ -691,26 +760,7 @@ def paystack_webhook():
             user = db.session.get(User, donation.user_id)
 
             # Send confirmation email
-            msg = Message(
-                subject="Donation Successful",
-                sender= Config.MAIL_DEFAULT_SENDER,
-                recipients=[user.email]
-            )
-            msg.body = f"""
-            Hello {user.fullname},
-
-            Thank you for your generous donation of GHS {amount:.2f}.
-            Your payment has been confirmed and your access is now unlocked.
-
-            Reference ID: {reference}
-
-            Best regards,
-            The Team
-            """
-            try:
-                mail.send(msg)
-            except Exception as e:
-                print(f"Failed to send email: {e}")
+            send_donation_email(user, donation.amount, donation.transaction_ref)
 
     return jsonify({"message": "Webhook received successfully"}), 200
 
@@ -776,4 +826,217 @@ def get_exchange_rates():
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# certificates.py (OR paste directly into your app.py)
+
+
+# If you use SQLAlchemy/your models:
+# from app import db
+# from app.models import Student, Certificate
+
+# SECRET for signing certificate verification links - store in env vars
+SIGNING_SECRET = os.getenv('CERT_SIGNING_KEY')
+
+
+def generate_signature(cert_id: str) -> str:
+    """Generate HMAC-SHA256 signature"""
+    return hmac.new(
+        SIGNING_SECRET.encode(),
+        cert_id.encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+
+def verify_signature(cert_id: str, sig: str) -> bool:
+    expected = generate_signature(cert_id)
+    return hmac.compare_digest(expected, sig)
+
+
+def make_qr_image(url: str, box_size=8) -> Image.Image:
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_Q,
+        box_size=box_size,
+        border=2
+    )
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+    return img
+
+
+def draw_certificate_pdf(buffer, student_name, course_title, date_str, cert_id, qr_img):
+    width, height = landscape(A4)
+    c = canvas.Canvas(buffer, pagesize=(width, height))
+
+    # Background
+    c.setFillColorRGB(0.95, 0.95, 0.98)
+    c.rect(0, 0, width, height, fill=True, stroke=False)
+
+    # Title
+    c.setFillColorRGB(0.08, 0.12, 0.27)
+    c.setFont("Helvetica-Bold", 36)
+    c.drawCentredString(width/2, height - 50*mm, "Certificate of Completion")
+
+    # Subtitle
+    c.setFont("Helvetica", 14)
+    c.drawCentredString(width/2, height - 70*mm, "This certifies that")
+
+    # Student Name
+    c.setFont("Helvetica-Bold", 28)
+    c.drawCentredString(width/2, height - 95*mm, student_name)
+
+    # Course
+    c.setFont("Helvetica", 16)
+    c.drawCentredString(width/2, height - 115*mm, f"has completed the course: {course_title}")
+
+    # Date + Certificate ID
+    c.setFont("Helvetica", 12)
+    c.drawString(25*mm, 25*mm, f"Issue Date: {date_str}")
+    c.drawString(25*mm, 20*mm, f"Certificate ID: {cert_id}")
+
+    # Signature line
+    c.line(width - 80*mm, 35*mm, width - 25*mm, 35*mm)
+    c.setFont("Helvetica", 10)
+    c.drawString(width - 75*mm, 30*mm, "Authorized Signature")
+
+    # Logo (optional)
+    logo_path = current_app.config.get("CERT_LOGO_PATH")
+    if logo_path and os.path.exists(logo_path):
+        logo = ImageReader(logo_path)
+        c.drawImage(logo, 25*mm, height - 40*mm, width=30*mm, height=30*mm)
+
+    # Insert QR Code
+    qr_reader = ImageReader(qr_img)
+    qr_width = 35*mm
+    c.drawImage(qr_reader, width - 55*mm, 25*mm, width=qr_width, height=qr_width)
+
+    c.setFont("Helvetica", 8)
+    c.drawCentredString(width - 37*mm, 20*mm, "Scan to verify")
+
+    c.showPage()
+    c.save()
+
+
+# ====================
+# ROUTES WITHOUT BLUEPRINTS
+# ==================
+
+
+@app.route("/certificates/generate/<int:course_id>", methods=["POST"])
+@jwt_required()
+def generate_certificate(course_id):
+    user_id = get_jwt_identity()
+    
+    user = db.session.get(User, user_id)
+    course = db.session.get(Course, course_id)
+    
+    if not user or not course:
+        return jsonify({"error": "User or course not found"}), 404
+    
+    # Check enrollment and progress
+    enrollment = db.session.scalar(sa.select(Enrollment).where(
+        Enrollment.user_id == user_id,
+        Enrollment.course_id == course_id
+    ))
+    
+    if not enrollment:
+        return jsonify({"error": "Not enrolled in this course"}), 400
+    
+    if enrollment.progress < 100:
+        return jsonify({"error": "Course not completed yet"}), 400
+    
+    # Check if certificate already exists
+    existing_cert = db.session.scalar(sa.select(Certificate).where(
+        Certificate.user_id == user_id,
+        Certificate.course_id == course_id
+    ))
+    
+    if existing_cert:
+        return jsonify({"error": "Certificate already generated"}), 400
+    
+    student_name = user.fullname
+    course_title = course.title
+    date_str = datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+
+    # Create certificate ID + signature
+    cert_id = f"cert_{user_id}_{course_id}_{int(time.time())}"
+    sig = generate_signature(cert_id)
+
+    # Save certificate to database
+    certificate = Certificate(
+        cert_id=cert_id,
+        user_id=user_id,
+        course_id=course_id,
+        student_name=student_name,
+        course_title=course_title,
+        signature=sig
+    )
+    db.session.add(certificate)
+    db.session.commit()
+
+    # After db.session.commit() in generate_certificate
+    AuditLog.log_audit(
+    id=user_id,
+    name=user.fullname,
+    role=user.roles,
+    action="Generated Certificate",
+    action_type="certificate",
+    description=f"Generated certificate for course: {course_title}",
+    target_type="certificate",
+    target_id=certificate.id,
+    ip_address=request.remote_addr,
+    user_agent=request.headers.get('User-Agent')
+)
+
+
+    # Verification URL encoded into QR
+    base_url = current_app.config.get("BASE_URL", "https://yckf-app.vercel.app")
+    verify_url = f"{base_url}/certificates/verify/{cert_id}?sig={sig}"
+
+    qr_img = make_qr_image(verify_url)
+
+    # Generate PDF in memory
+    buffer = io.BytesIO()
+    draw_certificate_pdf(buffer, student_name, course_title, date_str, cert_id, qr_img)
+    buffer.seek(0)
+
+    ActivityLog.log_activity("certificate", f"Generated certificate for {student_name} - {course_title}")
+    
+    filename = f"certificate_{user.fullname}_{course.title}.pdf".replace(" ", "_")
+    return send_file(buffer, as_attachment=True, download_name=filename, mimetype="application/pdf")
+
+
+
+@app.route("/certificates/verify/<cert_id>", methods=["GET"])
+def verify_certificate(cert_id):
+    sig = request.args.get("sig", "")
+    if not sig or not verify_signature(cert_id, sig):
+        return jsonify({"valid": False, "error": "Invalid signature"}), 400
+
+    return jsonify({
+        "valid": True,
+        "certificate_id": cert_id,
+        "message": "Certificate is authentic."
+    })
 

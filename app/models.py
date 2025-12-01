@@ -226,3 +226,155 @@ class ActivityLog(db.Model):
         db.session.add(activity)
         db.session.commit()
 
+
+
+
+
+
+
+
+
+
+class AuditLog(db.Model):
+    __tablename__ = "audit_logs"
+
+    id: so.Mapped[int] = so.mapped_column(primary_key=True)
+    
+    # Who performed the action
+    user_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("users.id"), nullable=False)
+    name: so.Mapped[str] = so.mapped_column(sa.String(100), nullable=False)
+    role: so.Mapped[str] = so.mapped_column(sa.String(50), nullable=False)  # ' or 'secondary'
+    
+    # What action was performed
+    action: so.Mapped[str] = so.mapped_column(sa.String(100), nullable=False)  # e.g., 'Updated Payment Key'
+    action_type: so.Mapped[str] = so.mapped_column(sa.String(50), nullable=False)  # e.g., 'financial', 'user', 'course'
+    description: so.Mapped[str] = so.mapped_column(sa.String(500), nullable=False)
+    
+    # Target of the action (optional)
+    target_type: so.Mapped[str] = so.mapped_column(sa.String(50), nullable=True)  # e.g., 'user', 'course', 'payment_key'
+    target_id: so.Mapped[int] = so.mapped_column(sa.Integer, nullable=True)
+    
+    # When and where
+    timestamp: so.Mapped[datetime] = so.mapped_column(sa.DateTime, default=sa.func.now(), index=True)
+    ip_address: so.Mapped[str] = so.mapped_column(sa.String(45), nullable=True)  # IPv4 or IPv6
+    user_agent: so.Mapped[str] = so.mapped_column(sa.String(255), nullable=True)
+    
+    # Status
+    status: so.Mapped[str] = so.mapped_column(sa.String(20), default='success')  # 'success' or 'failed'
+    error_message: so.Mapped[str] = so.mapped_column(sa.String(500), nullable=True)
+    
+    # Additional metadata (JSON for flexibility)
+    metadata: so.Mapped[dict] = so.mapped_column(sa.JSON, nullable=True)
+    
+    # Relationship
+    admin = db.relationship("User", foreign_keys=[id], backref="audit_logs")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "name": self.name,
+            "role": self.role,
+            "action": self.action,
+            "action_type": self.action_type,
+            "description": self.description,
+            "target_type": self.target_type,
+            "target_id": self.target_id,
+            "timestamp": self.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            "ip_address": self.ip_address,
+            "user_agent": self.user_agent,
+            "status": self.status,
+            "error_message": self.error_message,
+            "metadata": self.metadata
+        }
+
+    @staticmethod
+    def log_audit(id, name, role, action, action_type, description, 
+                  target_type=None, target_id=None, ip_address=None, user_agent=None, 
+                  status='success', error_message=None, metadata=None):
+        """
+        Log an audit entry
+        
+        Example usage:
+        AuditLog.log_audit(
+            id=1,
+            name="John Doe",
+            role="",
+            action="Updated Payment Key",
+            action_type="financial",
+            description="Updated Flutterwave API keys",
+            target_type="payment_key",
+            target_id=5,
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent'),
+            status='success',
+            metadata={"provider": "Flutterwave"}
+        )
+        """
+        audit = AuditLog(
+            id=id,
+            name=name,
+            role=role,
+            action=action,
+            action_type=action_type,
+            description=description,
+            target_type=target_type,
+            target_id=target_id,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            status=status,
+            error_message=error_message,
+            metadata=metadata
+        )
+        db.session.add(audit)
+        db.session.commit()
+        return audit
+
+
+    @staticmethod
+    def get_logs_filtered(name=None, action_type=None, date_from=None, date_to=None, status=None):
+        """Get filtered audit logs"""
+        query = AuditLog.query
+        
+        if name:
+            query = query.filter(AuditLog.name.ilike(f'%{name}%'))
+        if action_type:
+            query = query.filter(AuditLog.action_type == action_type)
+        if date_from:
+            query = query.filter(AuditLog.timestamp >= date_from)
+        if date_to:
+            query = query.filter(AuditLog.timestamp <= date_to)
+        if status:
+            query = query.filter(AuditLog.status == status)
+            
+        return query.order_by(AuditLog.timestamp.desc()).all()
+
+
+
+
+class Certificate(db.Model):
+    __tablename__ = "certificates"
+
+    id: so.Mapped[int] = so.mapped_column(primary_key=True)
+    cert_id: so.Mapped[str] = so.mapped_column(sa.String(100), unique=True, nullable=False)
+    user_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("users.id"), nullable=False)
+    course_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("courses.id"), nullable=False)
+    student_name: so.Mapped[str] = so.mapped_column(sa.String(255), nullable=False)
+    course_title: so.Mapped[str] = so.mapped_column(sa.String(255), nullable=False)
+    issue_date: so.Mapped[datetime] = so.mapped_column(sa.DateTime, default=lambda: datetime.now(timezone.utc))
+    signature: so.Mapped[str] = so.mapped_column(sa.String(255), nullable=False)
+    
+    user: so.Mapped["User"] = so.relationship("User")
+    course: so.Mapped["Course"] = so.relationship("Course")
+    
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "cert_id": self.cert_id,
+            "user_id": self.user_id,
+            "course_id": self.course_id,
+            "student_name": self.student_name,
+            "course_title": self.course_title,
+            "issue_date": self.issue_date.strftime("%Y-%m-%d %H:%M:%S"),
+            "signature": self.signature
+        }

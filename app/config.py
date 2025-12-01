@@ -20,3 +20,6 @@ class Config:
     UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads')
     PAYSTACK_SECRET_KEY = os.environ.get('PAYSTACK_SECRET_KEY')
     PAYSTACK_PUBLIC_KEY = os.environ.get('PAYSTACK_PUBLIC_KEY')
+    CERT_SIGNING_KEY = os.environ.get('CERT_SIGNING_KEY')
+    BASE_URL = os.environ.get('BASE_URL', 'https://yckf-app.vercel.app')
+    CERT_LOGO_PATH = os.environ.get('CERT_LOGO_PATH')

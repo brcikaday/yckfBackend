@@ -25,3 +25,6 @@ SQLAlchemy==2.0.44
 typing_extensions==4.15.0
 urllib3==2.5.0
 Werkzeug==2.3.8
+reportlab==4.0.9
+qrcode==7.4.2
+Pillow==10.1.0
