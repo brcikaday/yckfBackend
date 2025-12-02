@@ -570,6 +570,7 @@ def update_admin_profile():
 
 
 @app.route('/admin/password', methods=['PUT'])
+@jwt_required()
 def change_admin_password():
     user_id = get_jwt_identity()
     user = db.session.get(User, user_id)

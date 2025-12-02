@@ -267,7 +267,7 @@ class AuditLog(db.Model):
     meta_data: so.Mapped[dict] = so.mapped_column(sa.JSON, nullable=True)
     
     # Relationship
-    admin = db.relationship("User", foreign_keys=[id], backref="audit_logs")
+    admin = db.relationship("User", backref="audit_logs")
 
     def to_dict(self):
         return {
